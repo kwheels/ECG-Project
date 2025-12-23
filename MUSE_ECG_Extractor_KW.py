@@ -1,3 +1,6 @@
+import matplotlib
+matplotlib.use("Agg")
+
 from lxml import etree
 from matplotlib import pyplot as plt
 import argparse
@@ -187,7 +190,9 @@ def plot_ecgs(filename):
         axs[i].grid(True)
     axs[-1].set_xlabel('Samples')
     plt.tight_layout()
-    plt.show()
+    outname = Path(filename).with_suffix(".png").name
+    plt.savefig(outname, dpi=300, bbox_inches="tight")
+    plt.close()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Process and plot ECG data from Muse XML files.")
