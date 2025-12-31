@@ -89,44 +89,142 @@ def extract_xml(filename):
 
     return ECG
 
-def write_metadata(row_dict, out_path, append=True):
-    """
-    Write one row of metadata to a TSV file.
-    - If append=False (default): overwrite/create file and write header + row.
-    - If append=True: create file if missing (write header), otherwise append row only.
-    """
-    out_path = Path(out_path)
-    fieldnames = list(row_dict.keys())
+FIELDNAMES = [
+    "file_path",
+    "patient_id",
+    "patient_age",
+    "patient_gender",
+    "patient_race",
+    "priority",
+    "location",
+    "ecg_date",
+    "acquisition_software_version",
+    "analysis_software_version",
+    "overread_lastname",
+    "overread_firstname",
+    "admit_diagnosis",
+    "diagnosis_statement",
+    "original_diagnosis",
+    "VentricularRate",
+    "AtrialRate",
+    "PRInterval",
+    "QRSDuration",
+    "QTInterval",
+    "QTCorrected",
+    "PAxis",
+    "RAxis",
+    "TAxis",
+    "QRSCount",
+    "Original_VentricularRate",
+    "Original_AtrialRate",
+    "Original_PRInterval",
+    "Original_QRSDuration",
+    "Original_QTInterval",
+    "Original_QTCorrected",
+    "Original_PAxis",
+    "Original_RAxis",
+    "Original_TAxis",
+    "Original_QRSCount",
+]
 
+def iter_xml_files(inputs):
+    """
+    Yield XML files from a list of input paths.
+    - If a path is a file: yield it if it ends with .xml
+    - If a path is a directory: recursively yield *.xml
+    """
+    for p in inputs:
+        path = Path(p)
+        if path.is_file() and path.suffix.lower() == ".xml":
+            yield path
+        elif path.is_dir():
+            yield from path.rglob("*.xml")
+
+def clean_row_for_tsv(row_dict):
+    """
+    Normalize strings so TSV stays one record per line.
+    Converts newlines to literal '\\n'.
+    """
     cleaned = {}
-    for k, v in row_dict.items():
+    for k in FIELDNAMES:
+        v = row_dict.get(k, None)
         if isinstance(v, str):
             cleaned[k] = v.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\\n")
         else:
             cleaned[k] = v
+    return cleaned
+
+
+def write_metadata_batch(xml_paths, out_tsv, append=False, progress_every=1000):
+    """
+    Stream extraction results into a TSV (one row per XML).
+    Opens the output file once (fast).
+    Writes header if needed.
+    """
+    out_tsv = Path(out_tsv)
+    file_exists = out_tsv.exists()
 
     mode = "a" if append else "w"
-    file_exists = out_path.exists()
+    with out_tsv.open(mode, newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=FIELDNAMES,
+            delimiter="\t",
+            extrasaction="ignore"
+        )
 
-    with out_path.open(mode, newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter="\t", extrasaction="ignore")
-
-        # Write header if overwriting OR appending to a new file
+        # Write header only if we're overwriting OR appending to a new file
         if (not append) or (append and not file_exists):
             writer.writeheader()
 
-        writer.writerow(cleaned)
+        n = 0
+        for xml_file in xml_paths:
+            try:
+                ecg = extract_xml(str(xml_file))
+                writer.writerow(clean_row_for_tsv(ecg))
+                n += 1
+                if progress_every and n % progress_every == 0:
+                    print(f"Processed {n:,} files... (latest: {xml_file})")
+            except Exception as e:
+                # Keep going; log failures to stderr-friendly output
+                print(f"[WARN] Failed on {xml_file}: {e}")
+
+    print(f"Done. Wrote {n:,} rows to {out_tsv}")
 
 def main():
-    parser = argparse.ArgumentParser(description="Extract Muse XML metadata and export to TSV.")
-    parser.add_argument("xml_file", help="Path to a Muse XML file")
-    parser.add_argument("-o", "--out", default="muse_metadata.tsv", help="Output TSV filename (default: muse_metadata.tsv)")
-    parser.add_argument("--append", action="store_true", help="Append to TSV (write header only if file doesn't exist)")
+    parser = argparse.ArgumentParser(
+        description="Extract Muse XML metadata and export to a single TSV."
+    )
+    parser.add_argument(
+        "inputs",
+        nargs="+",
+        help="One or more XML files or directories (directories searched recursively for *.xml)"
+    )
+    parser.add_argument(
+        "-o", "--out",
+        default="muse_metadata_all.tsv",
+        help="Output TSV filename"
+    )
+    parser.add_argument(
+        "--append",
+        action="store_true",
+        help="Append to existing TSV (header written only if file does not exist)"
+    )
+    parser.add_argument(
+        "--progress-every",
+        type=int,
+        default=1000,
+        help="Print progress every N files (0 to disable)"
+    )
     args = parser.parse_args()
 
-    ecg = extract_xml(args.xml_file)
-    write_metadata(ecg, args.out, append=args.append)
-    print(f"Wrote metadata for 1 XML to: {args.out}")
+    xml_iter = iter_xml_files(args.inputs)
+    write_metadata_batch(
+        xml_paths=xml_iter,
+        out_tsv=args.out,
+        append=args.append,
+        progress_every=args.progress_every
+    )
 
 if __name__ == "__main__":
     main()
