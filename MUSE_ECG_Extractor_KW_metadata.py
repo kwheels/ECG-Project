@@ -124,7 +124,7 @@ def main():
     args = parser.parse_args()
 
     ecg = extract_xml(args.xml_file)
-    write_tsv_row(ecg, args.out, append=args.append)
+    write_metadata(ecg, args.out, append=args.append)
     print(f"Wrote metadata for 1 XML to: {args.out}")
 
 if __name__ == "__main__":
